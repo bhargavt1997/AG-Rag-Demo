@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RAG Demo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0f1117; --card: #181b25; --border: #262b38; --text: #e2e4ea; --dim: #6b7280; --accent: #818cf8; --green: #34d399; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 2rem 1rem; }
+    .layout-wrapper { max-width: 1000px; margin: 0 auto; }
+    .header { text-align: center; margin-bottom: 2rem; }
+    h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+    h1 span { color: var(--accent); }
+    .sub { color: var(--dim); font-size: .8rem; margin-bottom: .5rem; }
+    .status { font-size: .72rem; color: var(--accent); font-weight: 600; border: 1px solid var(--border); display: inline-block; padding: .2rem .75rem; border-radius: 99px; background: rgba(129, 140, 248, 0.1); }
+    
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start; }
+    @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+    
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; margin-bottom: 1rem; }
+    .card label { font-size: .7rem; text-transform: uppercase; letter-spacing: .5px; color: var(--dim); display: block; margin-bottom: .5rem; }
+    
+    /* DB View specifics */
+    .db-list { max-height: 600px; overflow-y: auto; padding-right: .5rem; }
+    .db-item { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: .75rem; margin-bottom: .75rem; }
+    .db-item-id { font-family: 'JetBrains Mono', monospace; font-size: .65rem; color: var(--green); margin-bottom: .4rem; }
+    .db-item-chunk { font-size: .85rem; line-height: 1.5; color: var(--text); margin-bottom: .6rem; }
+    .db-item-vector { font-family: 'JetBrains Mono', monospace; font-size: .65rem; color: var(--dim); background: #0a0b0f; padding: .5rem; border-radius: 4px; overflow-x: auto; white-space: nowrap; }
+    .db-item-vector span { color: var(--accent); }
+    
+    /* Forms & Inputs */
+    textarea, input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: .82rem; padding: .6rem; outline: none; }
+    textarea:focus, input:focus { border-color: var(--accent); }
+    textarea { min-height: 100px; resize: vertical; margin-bottom: .5rem; }
+    .samples { display: flex; gap: .4rem; margin-bottom: .5rem; flex-wrap: wrap; }
+    .samples button { font-size: .7rem; padding: .3rem .6rem; background: var(--bg); color: var(--dim); border: 1px solid var(--border); border-radius: 5px; cursor: pointer; }
+    .samples button:hover { color: var(--text); border-color: var(--accent); }
+    .btn { font-family: inherit; font-weight: 600; font-size: .8rem; border: none; border-radius: 6px; padding: .55rem 1rem; cursor: pointer; background: var(--accent); color: #fff; margin-top: .5rem; }
+    .btn:disabled { opacity: .4; }
+    
+    .answer { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: .75rem; margin-top: .75rem; font-size: .85rem; line-height: 1.6; white-space: pre-wrap; display: none; }
+    .answer.show { display: block; }
+    .chunks { margin-top: .5rem; display: none; }
+    .chunks.show { display: block; }
+    .chunk { background: var(--bg); border-radius: 6px; padding: .5rem .65rem; margin-top: .35rem; font-size: .75rem; color: var(--text); line-height: 1.5; border-left: 3px solid var(--accent); }
+    .chunk .score { color: var(--green); font-weight: 600; font-size: .65rem; display: block; margin-bottom: .2rem; }
+    .logs { font-family: 'JetBrains Mono', monospace; font-size: .68rem; background: #0a0b0f; border: 1px solid var(--border); border-radius: 6px; padding: .6rem; margin-top: .75rem; line-height: 1.8; color: var(--green); display: none; }
+    .logs.show { display: block; }
+
+    /* Custom scrollbar for webkit */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+  </style>
+</head>
+<body>
+
+<div class="layout-wrapper">
+  <div class="header">
+    <h1>⚡ <span>RAG</span> Pipeline Demo</h1>
+    <p class="sub">1. Ingest → 2. Embed (ChromaDB) → 3. Retrieve → 4. Generate (OpenAI)</p>
+    <div class="status" id="status">0 chunks in ChromaDB vector store</div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT COLUMN: Actions -->
+    <div class="col">
+      <!-- Ingest -->
+      <div class="card">
+        <label>1 · Add a document to Database</label>
+        <div class="samples">
+          <button onclick="loadSample('ai')">🤖 AI Basics</button>
+          <button onclick="loadSample('solar')">🌍 Solar System</button>
+          <button onclick="loadSample('coffee')">☕ Coffee</button>
+        </div>
+        <textarea id="doc" placeholder="Paste some text here... (it will be split by line breaks into chunks)"></textarea>
+        <button class="btn" id="ingestBtn" onclick="ingest()">Ingest into ChromaDB</button>
+      </div>
+
+      <!-- Query -->
+      <div class="card">
+        <label>2 · Ask LLM (With RAG Context)</label>
+        <input id="query" placeholder="e.g. What is the largest planet?" />
+        <button class="btn" id="queryBtn" onclick="askQuery()">Ask GPT-4o-mini</button>
+        <div class="answer" id="answer"></div>
+        <div class="chunks" id="chunks"></div>
+      </div>
+
+      <!-- Logs -->
+      <div class="card">
+        <label>Live Pipeline Logs</label>
+        <div class="logs show" id="logs">Waiting for action…</div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN: Database View -->
+    <div class="col">
+      <div class="card" style="height: 100%;">
+        <label>📦 Inside ChromaDB (Vector Store)</label>
+        <p style="font-size: .75rem; color: var(--dim); margin-bottom: 1rem; line-height: 1.5;">
+          When you ingest text, it is chopped into smaller chunks and converted into an 
+          <strong style="color:var(--text)">Embedding Vector</strong> (a giant array of floats). 
+          Here is exactly what is stored inside ChromaDB:
+        </p>
+        
+        <div class="db-list" id="dbList">
+          <div style="text-align:center; color: var(--dim); font-size: .8rem; padding: 3rem 0; border: 1px dashed var(--border); border-radius: 8px;">
+            Database is currently empty.<br/><br/>Ingest a document on the left to see its chunks & vectors appear here!
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SAMPLES = {
+  ai: `Artificial Intelligence (AI) is a branch of computer science focused on creating intelligent machines.\nMachine Learning (ML) is a subset where systems learn from data instead of being explicitly programmed.\nNatural Language Processing (NLP) enables computers to understand human language. Modern NLP uses transformer architectures like BERT and GPT.\nRetrieval-Augmented Generation (RAG) combines information retrieval with text generation.\nRelevant documents are retrieved from a knowledge base via vector search, then passed as context to a large language model to generate grounded responses. This reduces hallucination.\nVector databases like ChromaDB store embeddings — dense numerical representations of text.\nThese capture semantic meaning, enabling search by concept rather than keywords.`,
+  solar: `The Solar System has eight planets: Mercury, Venus, Earth, Mars, Jupiter, Saturn, Uranus, and Neptune.\nMercury is the smallest and closest to the Sun.\nVenus is the hottest due to its thick CO2 atmosphere (465°C).\nEarth is the only planet known to support life.\nMars has the largest volcano — Olympus Mons (21.9 km tall).\nJupiter is the largest planet with 95+ moons.\nSaturn has its famous ring system made of ice and rock.\nEuropa (Jupiter's moon) may have a subsurface ocean.\nTitan (Saturn's moon) has liquid methane lakes.`,
+  coffee: `Coffee is consumed over 2 billion cups daily worldwide.\nThe two main species are Arabica (60-70% of production, smooth flavor) and Robusta (stronger, more caffeine).\nThe process: harvest → process → dry → mill → roast.\nLight roasts preserve original flavor; dark roasts are bolder and smokier.\nBrewing methods include drip, French press, espresso, pour-over, and cold brew.\nIdeal water temperature: 90-96°C.\nTypical ratio: 1:15 to 1:18 coffee to water.`
+};
+
+function loadSample(key) { document.getElementById("doc").value = SAMPLES[key]; }
+
+function showLogs(logs) {
+  const el = document.getElementById("logs");
+  el.textContent = logs.join("\n");
+  el.classList.add("show");
+}
+
+let allChunks = []; // Store chunks in memory to keep rendering
+
+function renderDBList() {
+  const list = document.getElementById("dbList");
+  if (allChunks.length === 0) return;
+  
+  list.innerHTML = allChunks.map(c => `
+    <div class="db-item">
+      <div class="db-item-id">ID: ${c.id}</div>
+      <div class="db-item-chunk">"${c.text}"</div>
+      <div class="db-item-vector">
+        <span>Vector:</span> [${c.vector_preview.join(", ")} ... 1531 more floats]
+      </div>
+    </div>
+  `).reverse().join(""); // Show newest first
+}
+
+async function ingest() {
+  const text = document.getElementById("doc").value.trim();
+  if (!text) return alert("Add some text first");
+  
+  const btn = document.getElementById("ingestBtn");
+  btn.disabled = true;
+  btn.textContent = "Processing...";
+  
+  try {
+    const r = await fetch("/api/ingest", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({text}) });
+    const d = await r.json();
+    showLogs(d.logs);
+    document.getElementById("status").textContent = d.total + " chunks in ChromaDB vector store";
+    
+    // Add the new chunks from server to our UI array
+    if (d.chunks_info) {
+      allChunks.push(...d.chunks_info);
+      renderDBList();
+    }
+  } catch(e) { alert("Server error: is app.py running?"); }
+  
+  btn.disabled = false;
+  btn.textContent = "Ingest into ChromaDB";
+}
+
+async function askQuery() {
+  const q = document.getElementById("query").value.trim();
+  if (!q) return alert("Type a question!");
+  
+  const btn = document.getElementById("queryBtn");
+  btn.disabled = true;
+  btn.textContent = "Searching & Thinking...";
+  
+  document.getElementById("answer").classList.remove("show");
+  document.getElementById("chunks").classList.remove("show");
+  
+  try {
+    const r = await fetch("/api/query", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({query: q}) });
+    const d = await r.json();
+    if (d.error) { alert(d.error); btn.disabled=false; btn.textContent="Ask GPT-4o-mini"; return; }
+    
+    // Display Answer
+    document.getElementById("answer").textContent = d.answer;
+    document.getElementById("answer").classList.add("show");
+    
+    // Display injected chunks
+    document.getElementById("chunks").innerHTML = "<label style='font-size:.68rem;color:#6b7280;margin-bottom:.3rem;display:block'>Top 3 Chunks Injected into Prompt</label>" +
+      d.chunks.map((c,i) => `
+        <div class="chunk">
+          <span class="score">Similarity Score: ${d.scores[i]}</span>
+          ${c}
+        </div>
+      `).join("");
+    document.getElementById("chunks").classList.add("show");
+    
+    showLogs(d.logs);
+  } catch(e) { alert("Server error: is app.py running?"); }
+  
+  btn.disabled = false;
+  btn.textContent = "Ask GPT-4o-mini";
+}
+
+// Enter key binding
+document.getElementById("query").addEventListener("keydown", e => { if (e.key === "Enter") askQuery(); });
+</script>
+</body>
+</html>
