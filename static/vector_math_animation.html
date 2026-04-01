@@ -58,6 +58,12 @@
     .vtable tr.scanning td { background: rgba(129, 140, 248, 0.08); }
     .vtable tr.matched td { background: rgba(52, 211, 153, 0.1); }
     .vtable tr.dimmed td { opacity: .25; }
+    .vtable tr.query-row td {
+      background: rgba(253, 203, 110, 0.1);
+      border-bottom: 2px solid #fdcb6e;
+    }
+    .vtable tr.query-row .doc-text { color: #fdcb6e; font-weight: 600; }
+    .vtable tr.query-row .vec-nums { color: #fdcb6e; }
 
     .doc-text { color: #e2e4ea; font-size: .75rem; max-width: 220px; }
     .vec-nums {
@@ -323,14 +329,26 @@ async function startSearch() {
   const info = document.getElementById("stepInfo");
   const calc = document.getElementById("calcBox");
 
-  // Show query
+  // Show query card on right
   const qCard = document.getElementById("queryCard");
   qCard.style.display = "block";
   document.getElementById("queryText").textContent = QUERY.text;
   document.getElementById("queryVec").textContent = fmtVec(QUERY.vec);
 
+  // Insert query as a highlighted row at the TOP of the table
+  const tbody = document.getElementById("vtbody");
+  const qRow = document.createElement("tr");
+  qRow.classList.add("query-row");
+  qRow.innerHTML = `
+    <td style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:#fdcb6e;font-weight:600">❓ QUERY</td>
+    <td class="doc-text">${QUERY.text}</td>
+    <td class="vec-nums">${fmtVec(QUERY.vec)}</td>
+    <td class="score-cell" style="color:#fdcb6e">—</td>
+  `;
+  tbody.insertBefore(qRow, tbody.firstChild);
+
   info.innerHTML = `🔄 Query embedded: ${fmtVec(QUERY.vec)}`;
-  await sleep(800);
+  await sleep(1000);
 
   info.innerHTML = `<span class="scanning-indicator">🔍 Traversing database… comparing query vector against each document vector</span>`;
   await sleep(500);
