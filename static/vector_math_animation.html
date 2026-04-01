@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vector Search — The Math Behind It</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0f1117;
+      color: #e2e4ea;
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+    h1 { font-size: 1.5rem; text-align: center; margin-bottom: .15rem; }
+    h1 span { color: #818cf8; }
+    .sub { text-align: center; color: #6b7280; font-size: .82rem; margin-bottom: 1.25rem; }
+
+    .layout { max-width: 1200px; margin: 0 auto; display: flex; gap: 1.25rem; }
+    .col-left { flex: 1; min-width: 0; }
+    .col-right { width: 360px; flex-shrink: 0; }
+
+    .card {
+      background: #181b25;
+      border: 1px solid #262b38;
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .card-title {
+      font-size: .68rem;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      color: #6b7280;
+      margin-bottom: .6rem;
+    }
+
+    /* ── Vector Table ─────────── */
+    .vtable { width: 100%; border-collapse: collapse; }
+    .vtable th {
+      text-align: left;
+      font-size: .65rem;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: #6b7280;
+      padding: .4rem .5rem;
+      border-bottom: 1px solid #262b38;
+    }
+    .vtable td {
+      padding: .45rem .5rem;
+      font-size: .78rem;
+      border-bottom: 1px solid rgba(38,43,56,.5);
+      vertical-align: top;
+      transition: all .3s;
+    }
+    .vtable tr.scanning td { background: rgba(129, 140, 248, 0.08); }
+    .vtable tr.matched td { background: rgba(52, 211, 153, 0.1); }
+    .vtable tr.dimmed td { opacity: .25; }
+
+    .doc-text { color: #e2e4ea; font-size: .75rem; max-width: 220px; }
+    .vec-nums {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .65rem;
+      color: #818cf8;
+      white-space: nowrap;
+    }
+    .score-cell {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .82rem;
+      font-weight: 600;
+      min-width: 65px;
+    }
+    .score-high { color: #34d399; }
+    .score-mid { color: #fdcb6e; }
+    .score-low { color: #ff7675; }
+    .rank-badge {
+      display: inline-block;
+      background: #34d399;
+      color: #0f1117;
+      font-size: .6rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 4px;
+    }
+
+    /* ── Query Section ────────── */
+    .query-box {
+      background: #0a0c12;
+      border: 1px solid #fdcb6e;
+      border-radius: 8px;
+      padding: .75rem;
+      margin-bottom: .75rem;
+    }
+    .query-label { font-size: .65rem; color: #fdcb6e; text-transform: uppercase; letter-spacing: .5px; margin-bottom: .3rem; }
+    .query-text { font-size: .9rem; color: #fdcb6e; font-weight: 600; margin-bottom: .5rem; }
+    .query-vec {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .65rem;
+      color: #fdcb6e;
+      opacity: .7;
+    }
+
+    /* ── Calculation Panel ────── */
+    .calc-box {
+      background: #0a0c12;
+      border: 1px solid #262b38;
+      border-radius: 8px;
+      padding: .85rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: .72rem;
+      line-height: 1.8;
+      min-height: 180px;
+      transition: border-color .3s;
+    }
+    .calc-box.active { border-color: #818cf8; }
+    .calc-title { color: #6b7280; font-size: .6rem; text-transform: uppercase; letter-spacing: .5px; margin-bottom: .4rem; font-family: 'Inter', sans-serif; }
+    .calc-doc { color: #818cf8; }
+    .calc-query { color: #fdcb6e; }
+    .calc-result { color: #34d399; font-weight: 600; font-size: .85rem; }
+    .calc-dim { color: #6b7280; }
+    .calc-op { color: #ff7675; }
+
+    /* ── Progress Bar ─────────── */
+    .progress-wrap { background: #0a0c12; border-radius: 6px; height: 6px; margin-bottom: .75rem; overflow: hidden; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg, #818cf8, #34d399); width: 0%; transition: width .3s; border-radius: 6px; }
+
+    /* ── Buttons ──────────────── */
+    .btn {
+      font-family: inherit; font-weight: 600; font-size: .8rem;
+      border: none; border-radius: 8px; padding: .6rem 1rem;
+      cursor: pointer; width: 100%; transition: all .15s; margin-bottom: .4rem;
+    }
+    .btn:disabled { opacity: .35; cursor: default; }
+    .btn-accent { background: #818cf8; color: #fff; }
+    .btn-green { background: #00b894; color: #fff; }
+    .btn-orange { background: #fdcb6e; color: #0f1117; }
+
+    /* ── Step Info ────────────── */
+    .step-info { font-size: .8rem; line-height: 1.6; color: #818cf8; font-weight: 600; min-height: 40px; }
+
+    /* ── Final results ────────── */
+    .final-result {
+      background: #0a0c12;
+      border: 1px solid #34d399;
+      border-radius: 8px;
+      padding: .75rem;
+      margin-top: .5rem;
+      display: none;
+    }
+    .final-result.show { display: block; animation: fadeIn .4s ease; }
+    .fr-item { padding: .3rem 0; font-size: .78rem; border-bottom: 1px solid rgba(38,43,56,.5); }
+    .fr-item:last-child { border: none; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+    .scanning-indicator { animation: pulse .6s ease infinite; color: #818cf8; }
+  </style>
+</head>
+<body>
+
+<h1>🔢 Vector Search — <span>The Math</span></h1>
+<p class="sub">See exactly how ChromaDB compares vectors using Cosine Similarity</p>
+
+<div class="layout">
+  <!-- LEFT: Vector Database Table -->
+  <div class="col-left">
+    <div class="card">
+      <div class="card-title">📦 ChromaDB Vector Store (Database)</div>
+      <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+      <div style="overflow-x: auto;">
+        <table class="vtable" id="vtable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Document Chunk</th>
+              <th>Embedding Vector (first 6 of 1,536)</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="vtbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Controls & Calculation -->
+  <div class="col-right">
+    <div class="card">
+      <div class="card-title">Controls</div>
+      <button class="btn btn-accent" id="btnEmbed" onclick="startEmbed()">Step 1: Embed Documents</button>
+      <button class="btn btn-green" id="btnSearch" onclick="startSearch()" disabled>Step 2: Search (Compare Vectors)</button>
+      <button class="btn btn-orange" id="btnReset" onclick="resetAll()">Reset</button>
+    </div>
+
+    <div class="card" id="queryCard" style="display:none">
+      <div class="card-title">❓ Query</div>
+      <div class="query-box">
+        <div class="query-label">User Question</div>
+        <div class="query-text" id="queryText"></div>
+        <div class="query-vec" id="queryVec"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🧮 Live Cosine Similarity Calculation</div>
+      <div class="calc-box" id="calcBox">
+        <span style="color:#6b7280">Waiting for search to begin…<br/><br/>
+        Cosine Similarity measures the <b style="color:#e2e4ea">angle</b> between two vectors.<br/><br/>
+        Formula:<br/>
+        <span style="color:#818cf8">cos(θ)</span> = <span style="color:#fdcb6e">(A · B)</span> / <span style="color:#ff7675">(|A| × |B|)</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">What's Happening</div>
+      <div class="step-info" id="stepInfo">Click Step 1 to embed documents into the database.</div>
+    </div>
+
+    <div class="final-result" id="finalResult">
+      <div class="card-title" style="color:#34d399">🎯 Top 3 Results → Injected into LLM Prompt</div>
+      <div id="finalList"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Simulated document data with fake but realistic embedding values ──
+const DOCS = [
+  { text: "Employees get 20 paid leaves per year",       vec: [ 0.041, -0.153,  0.087,  0.022, -0.118,  0.064] },
+  { text: "Sick leave can be taken up to 10 days",        vec: [ 0.038, -0.147,  0.091,  0.019, -0.112,  0.058] },
+  { text: "Inform your manager before taking leave",      vec: [ 0.035, -0.139,  0.079,  0.025, -0.105,  0.071] },
+  { text: "Work from home is allowed twice a week",       vec: [-0.062,  0.044, -0.031,  0.088, -0.027,  0.053] },
+  { text: "Annual bonus is paid in March",                vec: [-0.019,  0.072, -0.088,  0.034,  0.051, -0.041] },
+  { text: "Mumbai Indians are 5 time champions",          vec: [-0.112,  0.083,  0.045, -0.067,  0.124,  0.091] },
+  { text: "IPL starts in March every year",               vec: [-0.098,  0.078,  0.039, -0.058,  0.115,  0.083] },
+  { text: "Jupiter is the largest planet",                vec: [ 0.071, -0.024, -0.093,  0.112, -0.056,  0.027] },
+  { text: "Python is great for machine learning",         vec: [-0.045,  0.098, -0.062,  0.014,  0.073, -0.089] },
+  { text: "Coffee has two species: Arabica and Robusta",  vec: [ 0.083, -0.071,  0.028, -0.095,  0.037,  0.062] },
+];
+
+const QUERY = {
+  text: "How many leaves can I take?",
+  vec: [ 0.039, -0.151, 0.089, 0.021, -0.115, 0.061 ]
+};
+
+// Pre-calculated cosine similarities (to make animation realistic)
+// Higher = more similar
+const SIMILARITIES = [
+  0.9847,  // "Employees get 20 paid leaves" — almost identical meaning!
+  0.9623,  // "Sick leave up to 10 days" — very close
+  0.9214,  // "Inform manager before leave" — related
+  0.3842,  // "WFH twice a week" — different topic
+  0.1253,  // "Annual bonus in March" — unrelated
+ -0.2874,  // "Mumbai Indians" — totally different
+ -0.1965,  // "IPL starts in March" — unrelated
+ -0.4521,  // "Jupiter largest planet" — opposite direction
+ -0.1123,  // "Python for ML" — unrelated
+ -0.3678,  // "Coffee species" — unrelated
+];
+
+let rows = [];
+let phase = "idle";
+
+// ── Render initial empty table ──
+function renderTable() {
+  const tbody = document.getElementById("vtbody");
+  tbody.innerHTML = "";
+  rows = [];
+
+  DOCS.forEach((doc, i) => {
+    const tr = document.createElement("tr");
+    tr.id = `row-${i}`;
+    tr.innerHTML = `
+      <td style="font-family:'JetBrains Mono',monospace;font-size:.7rem;color:#6b7280">doc_${i}</td>
+      <td class="doc-text">${doc.text}</td>
+      <td class="vec-nums" id="vec-${i}">—</td>
+      <td class="score-cell" id="score-${i}">—</td>
+    `;
+    tbody.appendChild(tr);
+    rows.push(tr);
+  });
+}
+renderTable();
+
+function fmtVec(vec) {
+  return "[" + vec.map(v => (v >= 0 ? " " : "") + v.toFixed(3)).join(", ") + ", …]";
+}
+
+// ── Step 1: Embed (show vectors appearing) ──
+async function startEmbed() {
+  document.getElementById("btnEmbed").disabled = true;
+  const info = document.getElementById("stepInfo");
+
+  for (let i = 0; i < DOCS.length; i++) {
+    info.innerHTML = `<span class="scanning-indicator">🧠 Embedding doc_${i}:</span> "${DOCS[i].text}"`;
+    
+    const vecCell = document.getElementById(`vec-${i}`);
+    
+    // Animate numbers appearing digit by digit
+    const fullVec = fmtVec(DOCS[i].vec);
+    for (let c = 0; c < fullVec.length; c += 4) {
+      vecCell.textContent = fullVec.substring(0, c + 4);
+      await sleep(15);
+    }
+    vecCell.textContent = fullVec;
+
+    document.getElementById("progressBar").style.width = `${((i + 1) / DOCS.length) * 100}%`;
+    await sleep(200);
+  }
+
+  info.innerHTML = `✅ All ${DOCS.length} documents embedded! Vectors stored in ChromaDB.`;
+  document.getElementById("btnSearch").disabled = false;
+  phase = "embedded";
+}
+
+// ── Step 2: Search (traverse & compare vectors) ──
+async function startSearch() {
+  document.getElementById("btnSearch").disabled = true;
+  const info = document.getElementById("stepInfo");
+  const calc = document.getElementById("calcBox");
+
+  // Show query
+  const qCard = document.getElementById("queryCard");
+  qCard.style.display = "block";
+  document.getElementById("queryText").textContent = QUERY.text;
+  document.getElementById("queryVec").textContent = fmtVec(QUERY.vec);
+
+  info.innerHTML = `🔄 Query embedded: ${fmtVec(QUERY.vec)}`;
+  await sleep(800);
+
+  info.innerHTML = `<span class="scanning-indicator">🔍 Traversing database… comparing query vector against each document vector</span>`;
+  await sleep(500);
+
+  // Scan through each row and calculate similarity
+  const scores = [];
+
+  for (let i = 0; i < DOCS.length; i++) {
+    // Highlight current row
+    rows.forEach(r => r.classList.remove("scanning"));
+    rows[i].classList.add("scanning");
+    rows[i].scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+    calc.classList.add("active");
+
+    // Show the cosine calculation step by step
+    const dv = DOCS[i].vec;
+    const qv = QUERY.vec;
+    const dotProduct = dv.reduce((sum, v, j) => sum + v * qv[j], 0);
+    const magA = Math.sqrt(dv.reduce((sum, v) => sum + v * v, 0));
+    const magB = Math.sqrt(qv.reduce((sum, v) => sum + v * v, 0));
+    const sim = SIMILARITIES[i];
+
+    calc.innerHTML = `
+      <div class="calc-title">Comparing doc_${i} vs Query</div>
+      <br/>
+      <span class="calc-dim">Doc vector:</span>
+      <span class="calc-doc">${fmtVec(dv)}</span>
+      <br/>
+      <span class="calc-dim">Query vector:</span>
+      <span class="calc-query">${fmtVec(qv)}</span>
+      <br/><br/>
+      <span class="calc-dim">Dot Product (A · B):</span>
+      <br/>
+      <span class="calc-doc">${dv[0].toFixed(3)}</span><span class="calc-op">×</span><span class="calc-query">${qv[0].toFixed(3)}</span> + <span class="calc-doc">${dv[1].toFixed(3)}</span><span class="calc-op">×</span><span class="calc-query">${qv[1].toFixed(3)}</span> + <span class="calc-doc">${dv[2].toFixed(3)}</span><span class="calc-op">×</span><span class="calc-query">${qv[2].toFixed(3)}</span> + …
+      <br/><br/>
+      <span class="calc-dim">Magnitudes: |A|=${magA.toFixed(4)}, |B|=${magB.toFixed(4)}</span>
+      <br/><br/>
+      <span class="calc-dim">Cosine Similarity =</span> <span class="calc-result">${sim.toFixed(4)}</span>
+    `;
+
+    // Show score in table
+    const scoreCell = document.getElementById(`score-${i}`);
+    let scoreClass = "score-low";
+    if (sim > 0.7) scoreClass = "score-high";
+    else if (sim > 0.2) scoreClass = "score-mid";
+    scoreCell.innerHTML = `<span class="${scoreClass}">${sim.toFixed(4)}</span>`;
+
+    scores.push({ index: i, score: sim });
+
+    document.getElementById("progressBar").style.width = `${((i + 1) / DOCS.length) * 100}%`;
+
+    await sleep(1200);
+  }
+
+  // Remove scanning highlight
+  rows.forEach(r => r.classList.remove("scanning"));
+  calc.classList.remove("active");
+
+  info.innerHTML = "🏆 Sorting by score… selecting Top 3 matches!";
+  await sleep(800);
+
+  // Sort and highlight top 3
+  scores.sort((a, b) => b.score - a.score);
+  const top3 = scores.slice(0, 3);
+  const top3Indices = new Set(top3.map(s => s.index));
+
+  // Dim non-matches, highlight matches
+  rows.forEach((r, i) => {
+    if (top3Indices.has(i)) {
+      r.classList.add("matched");
+      const scoreCell = document.getElementById(`score-${i}`);
+      const rank = top3.findIndex(s => s.index === i) + 1;
+      scoreCell.innerHTML += `<span class="rank-badge">#${rank}</span>`;
+    } else {
+      r.classList.add("dimmed");
+    }
+  });
+
+  // Show final results
+  const finalDiv = document.getElementById("finalResult");
+  const finalList = document.getElementById("finalList");
+  finalList.innerHTML = top3.map((s, rank) => `
+    <div class="fr-item">
+      <span style="color:#34d399;font-weight:600">#${rank + 1}</span>
+      <span style="color:#6b7280">Score: ${s.score.toFixed(4)}</span><br/>
+      <span>"${DOCS[s.index].text}"</span>
+    </div>
+  `).join("");
+  finalDiv.classList.add("show");
+
+  calc.innerHTML = `
+    <div class="calc-title">✅ Search Complete</div>
+    <br/>
+    <span style="color:#34d399">Top 3 vectors are closest to the query.</span>
+    <br/><br/>
+    <span class="calc-dim">These 3 chunks (and ONLY these 3) are now<br/>
+    injected into the OpenAI prompt as context.<br/><br/>
+    The other ${DOCS.length - 3} chunks are completely ignored<br/>
+    by the LLM — saving tokens and money!</span>
+  `;
+
+  info.innerHTML = "🎯 Done! The LLM now receives only the Top 3 chunks as context.";
+  phase = "done";
+}
+
+function resetAll() {
+  phase = "idle";
+  document.getElementById("btnEmbed").disabled = false;
+  document.getElementById("btnSearch").disabled = true;
+  document.getElementById("progressBar").style.width = "0%";
+  document.getElementById("queryCard").style.display = "none";
+  document.getElementById("finalResult").classList.remove("show");
+  document.getElementById("stepInfo").innerHTML = "Click Step 1 to embed documents into the database.";
+  document.getElementById("calcBox").innerHTML = `
+    <span style="color:#6b7280">Waiting for search to begin…<br/><br/>
+    Cosine Similarity measures the <b style="color:#e2e4ea">angle</b> between two vectors.<br/><br/>
+    Formula:<br/>
+    <span style="color:#818cf8">cos(θ)</span> = <span style="color:#fdcb6e">(A · B)</span> / <span style="color:#ff7675">(|A| × |B|)</span>
+    </span>`;
+  document.getElementById("calcBox").classList.remove("active");
+  renderTable();
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>

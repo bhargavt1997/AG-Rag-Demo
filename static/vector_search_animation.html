@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>How Vector Search Works — Visual Demo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0f1117;
+      color: #e2e4ea;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 1.5rem;
+    }
+    h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+    h1 span { color: #818cf8; }
+    .sub { color: #6b7280; font-size: .85rem; margin-bottom: 1rem; }
+
+    .container { display: flex; gap: 1.5rem; max-width: 1100px; width: 100%; }
+
+    /* Canvas area */
+    .canvas-wrap {
+      flex: 1;
+      background: #181b25;
+      border: 1px solid #262b38;
+      border-radius: 12px;
+      position: relative;
+      overflow: hidden;
+      min-height: 520px;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* Right panel */
+    .panel {
+      width: 320px;
+      display: flex;
+      flex-direction: column;
+      gap: .75rem;
+    }
+    .card {
+      background: #181b25;
+      border: 1px solid #262b38;
+      border-radius: 10px;
+      padding: 1rem;
+    }
+    .card-title {
+      font-size: .7rem;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: #6b7280;
+      margin-bottom: .5rem;
+    }
+
+    .btn {
+      font-family: inherit;
+      font-weight: 600;
+      font-size: .82rem;
+      border: none;
+      border-radius: 8px;
+      padding: .6rem 1rem;
+      cursor: pointer;
+      width: 100%;
+      transition: all .15s;
+    }
+    .btn-accent { background: #818cf8; color: #fff; }
+    .btn-accent:hover { background: #6c5ce7; }
+    .btn-green { background: #00b894; color: #fff; margin-top: .4rem; }
+    .btn-green:hover { background: #00a381; }
+    .btn-orange { background: #fdcb6e; color: #0f1117; margin-top: .4rem; }
+    .btn-orange:hover { background: #f0b849; }
+    .btn:disabled { opacity: .4; cursor: default; }
+
+    .legend { display: flex; flex-direction: column; gap: .4rem; }
+    .legend-item { display: flex; align-items: center; gap: .5rem; font-size: .78rem; color: #6b7280; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+    .results { font-size: .78rem; line-height: 1.6; }
+    .result-item { padding: .4rem .5rem; border-radius: 6px; margin-bottom: .3rem; background: #0f1117; }
+    .result-item .score { color: #34d399; font-weight: 600; }
+    .result-item .label { color: #e2e4ea; }
+    .result-item.dim { opacity: .35; }
+
+    .step-info {
+      font-size: .8rem;
+      line-height: 1.6;
+      color: #818cf8;
+      font-weight: 600;
+      min-height: 50px;
+    }
+
+    .instructions {
+      font-size: .75rem;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🔍 How <span>Vector Search</span> Works</h1>
+<p class="sub">A 2D visualization of what ChromaDB does in 1,536 dimensions</p>
+
+<div class="container">
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <div class="card-title">Controls</div>
+      <button class="btn btn-accent" id="btnIngest" onclick="animateIngest()">Step 1: Ingest Documents</button>
+      <button class="btn btn-green" id="btnQuery" onclick="animateQuery()" disabled>Step 2: Search Query</button>
+      <button class="btn btn-orange" id="btnReset" onclick="resetAll()">Reset</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">What's Happening</div>
+      <div class="step-info" id="stepInfo">
+        Click "Step 1" to begin the demo.<br/>
+        Each dot = a document chunk's position in vector space.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Retrieved Results</div>
+      <div class="results" id="results">
+        <span style="color:#6b7280">No search yet…</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Legend</div>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#6b7280"></div> Document chunk (not yet embedded)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#818cf8"></div> Embedded document (has a vector)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#fdcb6e"></div> Your query</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#34d399"></div> Top 3 matches (closest vectors)</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#ff7675; opacity:.3"></div> Non-matching chunks (far away)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let W, H;
+function resize() {
+  const wrap = canvas.parentElement;
+  canvas.width = wrap.clientWidth * 2;
+  canvas.height = wrap.clientHeight * 2;
+  W = canvas.width;
+  H = canvas.height;
+  ctx.scale(1, 1);
+}
+resize();
+window.addEventListener("resize", () => { resize(); draw(); });
+
+// ── Data ──────────────────────────────
+const DOCS = [
+  { label: "Employees get 20 paid leaves", cat: "hr" },
+  { label: "Sick leave: up to 10 days", cat: "hr" },
+  { label: "WFH allowed twice a week", cat: "hr" },
+  { label: "Annual bonus paid in March", cat: "hr" },
+  { label: "Jupiter is the largest planet", cat: "science" },
+  { label: "Saturn has rings of ice", cat: "science" },
+  { label: "Mars has a thin atmosphere", cat: "science" },
+  { label: "Water boils at 100°C", cat: "science" },
+  { label: "IPL starts in March 2026", cat: "sports" },
+  { label: "Mumbai Indians: 5 titles", cat: "sports" },
+  { label: "Virat Kohli: top run scorer", cat: "sports" },
+  { label: "Coffee has 2 species: Arabica & Robusta", cat: "food" },
+  { label: "Espresso uses 9 bars pressure", cat: "food" },
+  { label: "Tea is the most popular in India", cat: "food" },
+  { label: "React is a JS framework", cat: "tech" },
+  { label: "Python is great for ML", cat: "tech" },
+];
+
+const QUERY = { label: "How many leaves can I take?", x: 0, y: 0 };
+
+// Cluster centers (simulate semantic grouping in 2D)
+const CLUSTERS = {
+  hr:      { cx: 0.2, cy: 0.25 },
+  science: { cx: 0.75, cy: 0.2 },
+  sports:  { cx: 0.7, cy: 0.75 },
+  food:    { cx: 0.25, cy: 0.75 },
+  tech:    { cx: 0.5, cy: 0.5 },
+};
+
+let dots = [];
+let queryDot = null;
+let phase = "idle"; // idle | ingesting | ingested | searching | done
+let animFrame = 0;
+let matchIndices = [];
+
+function initDots() {
+  dots = DOCS.map((doc, i) => {
+    const cluster = CLUSTERS[doc.cat];
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 30 + Math.random() * 60;
+    return {
+      label: doc.label,
+      cat: doc.cat,
+      // Start position (scattered randomly)
+      sx: 80 + Math.random() * (W - 160),
+      sy: 80 + Math.random() * (H - 160),
+      // Target position (clustered by meaning)
+      tx: cluster.cx * W + Math.cos(angle) * radius,
+      ty: cluster.cy * H + Math.sin(angle) * radius,
+      // Current position
+      x: 80 + Math.random() * (W - 160),
+      y: 80 + Math.random() * (H - 160),
+      embedded: false,
+      matched: false,
+      dimmed: false,
+      size: 8,
+      alpha: 0.6,
+    };
+  });
+}
+initDots();
+
+// ── Drawing ────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // Background grid
+  ctx.strokeStyle = "rgba(38, 43, 56, 0.5)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 60) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 60) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // Draw connection lines from query to matches
+  if (queryDot && matchIndices.length > 0) {
+    matchIndices.forEach((mi, rank) => {
+      const d = dots[mi];
+      ctx.strokeStyle = `rgba(52, 211, 153, ${0.4 - rank * 0.1})`;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(queryDot.x, queryDot.y);
+      ctx.lineTo(d.x, d.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+  }
+
+  // Draw dots
+  dots.forEach((d, i) => {
+    let color;
+    let glow = false;
+    let sz = d.size;
+
+    if (d.matched) {
+      color = "#34d399";
+      glow = true;
+      sz = 14;
+    } else if (d.dimmed) {
+      color = "rgba(255, 118, 117, 0.25)";
+      sz = 6;
+    } else if (d.embedded) {
+      color = "#818cf8";
+    } else {
+      color = "#6b7280";
+    }
+
+    if (glow) {
+      ctx.shadowColor = "#34d399";
+      ctx.shadowBlur = 20;
+    }
+
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, sz, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = d.alpha;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+
+    // Label
+    if (d.embedded && !d.dimmed) {
+      ctx.font = "600 16px Inter";
+      ctx.fillStyle = d.matched ? "#34d399" : "rgba(226,228,234,0.7)";
+      ctx.fillText(d.label, d.x + sz + 6, d.y + 5);
+    }
+  });
+
+  // Draw query dot
+  if (queryDot) {
+    ctx.shadowColor = "#fdcb6e";
+    ctx.shadowBlur = 25;
+    ctx.beginPath();
+    ctx.arc(queryDot.x, queryDot.y, 16, 0, Math.PI * 2);
+    ctx.fillStyle = "#fdcb6e";
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.font = "700 18px Inter";
+    ctx.fillStyle = "#fdcb6e";
+    ctx.fillText("❓ " + queryDot.label, queryDot.x + 22, queryDot.y + 6);
+  }
+}
+
+// ── Animations ─────────────────────────
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function animateIngest() {
+  phase = "ingesting";
+  document.getElementById("btnIngest").disabled = true;
+  const info = document.getElementById("stepInfo");
+
+  let i = 0;
+  function embedNext() {
+    if (i >= dots.length) {
+      phase = "ingested";
+      document.getElementById("btnQuery").disabled = false;
+      info.innerHTML = "✅ All 16 documents embedded & stored in ChromaDB!<br/>Now click Step 2 to run a similarity search.";
+      draw();
+      return;
+    }
+
+    const d = dots[i];
+    d.embedded = true;
+    d.alpha = 1;
+    info.innerHTML = `🧠 Embedding doc ${i + 1}/16:<br/>"${d.label}"<br/><span style="color:#6b7280">Moving to its semantic position in vector space…</span>`;
+
+    // Animate the dot moving from random position to its semantic cluster
+    let t = 0;
+    function tick() {
+      t += 0.04;
+      if (t >= 1) {
+        d.x = d.tx;
+        d.y = d.ty;
+        draw();
+        i++;
+        setTimeout(embedNext, 120);
+        return;
+      }
+      d.x = lerp(d.sx, d.tx, easeOut(t));
+      d.y = lerp(d.sy, d.ty, easeOut(t));
+      draw();
+      requestAnimationFrame(tick);
+    }
+    tick();
+  }
+  embedNext();
+}
+
+function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+
+function animateQuery() {
+  phase = "searching";
+  document.getElementById("btnQuery").disabled = true;
+  const info = document.getElementById("stepInfo");
+
+  // Place query near the HR cluster (since the question is about leaves)
+  const hrCluster = CLUSTERS.hr;
+  queryDot = {
+    label: QUERY.label,
+    x: W / 2,
+    y: H / 2,
+    tx: hrCluster.cx * W + 15,
+    ty: hrCluster.cy * H + 15,
+  };
+
+  info.innerHTML = `❓ Query: "${QUERY.label}"<br/><span style="color:#6b7280">Embedding query and searching vector space…</span>`;
+
+  // Step 1: Animate query dot appearing and moving to its vector position
+  let t = 0;
+  const startX = W / 2, startY = H - 80;
+  queryDot.x = startX;
+  queryDot.y = startY;
+
+  function moveQuery() {
+    t += 0.025;
+    if (t >= 1) {
+      queryDot.x = queryDot.tx;
+      queryDot.y = queryDot.ty;
+      draw();
+      setTimeout(findMatches, 600);
+      return;
+    }
+    queryDot.x = lerp(startX, queryDot.tx, easeOut(t));
+    queryDot.y = lerp(startY, queryDot.ty, easeOut(t));
+    draw();
+    requestAnimationFrame(moveQuery);
+  }
+  moveQuery();
+
+  function findMatches() {
+    info.innerHTML = `🔍 Calculating cosine similarity against all 16 chunks…<br/><span style="color:#6b7280">Finding the Top 3 closest vectors…</span>`;
+
+    // Calculate distances
+    const distances = dots.map((d, i) => {
+      const dx = d.x - queryDot.x;
+      const dy = d.y - queryDot.y;
+      return { index: i, dist: Math.sqrt(dx * dx + dy * dy) };
+    });
+    distances.sort((a, b) => a.dist - b.dist);
+
+    // Top 3
+    matchIndices = distances.slice(0, 3).map(d => d.index);
+
+    // Animate: dim non-matches, highlight matches
+    let step = 0;
+    function reveal() {
+      if (step === 0) {
+        // Dim all non-matches
+        dots.forEach((d, i) => {
+          if (!matchIndices.includes(i)) {
+            d.dimmed = true;
+            d.alpha = 0.25;
+          }
+        });
+        draw();
+        step++;
+        setTimeout(reveal, 500);
+      } else if (step <= 3) {
+        // Highlight matches one by one
+        const mi = matchIndices[step - 1];
+        dots[mi].matched = true;
+        dots[mi].alpha = 1;
+        draw();
+        step++;
+        setTimeout(reveal, 400);
+      } else {
+        // Show results
+        phase = "done";
+        info.innerHTML = `✅ Found Top 3 matches!<br/><span style="color:#6b7280">These 3 chunks are injected into the OpenAI prompt.</span>`;
+
+        const resultsEl = document.getElementById("results");
+        resultsEl.innerHTML = matchIndices.map((mi, rank) => {
+          const d = dots[mi];
+          const score = (1 - distances.find(x => x.index === mi).dist / 500).toFixed(4);
+          return `<div class="result-item">
+            <span class="score">#${rank + 1} Score: ${score}</span><br/>
+            <span class="label">"${d.label}"</span>
+          </div>`;
+        }).join("") + `<br/><div style="color:#6b7280;font-size:.72rem">
+          ⬆️ Only these 3 chunks go to the LLM.<br/>
+          The other 13 chunks are ignored!
+        </div>`;
+
+        draw();
+      }
+    }
+    reveal();
+  }
+}
+
+function resetAll() {
+  phase = "idle";
+  queryDot = null;
+  matchIndices = [];
+  initDots();
+  document.getElementById("btnIngest").disabled = false;
+  document.getElementById("btnQuery").disabled = true;
+  document.getElementById("stepInfo").innerHTML = 'Click "Step 1" to begin the demo.<br/>Each dot = a document chunk\'s position in vector space.';
+  document.getElementById("results").innerHTML = '<span style="color:#6b7280">No search yet…</span>';
+  draw();
+}
+
+draw();
+</script>
+</body>
+</html>
